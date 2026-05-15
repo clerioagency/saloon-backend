@@ -7,6 +7,7 @@ import requests
 import re
 import uuid
 from datetime import datetime
+from dotenv import load_dotenv
 import os
 
 from pymongo import MongoClient
@@ -23,14 +24,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-GROQ_API_KEY           = "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"
-TWILIO_ACCOUNT_SID     = "ACfa29e0490de295a9e7b3856e5da2039f"
-TWILIO_AUTH_TOKEN      = "8ec97d21870dab47709b29701e380d20"
-TWILIO_WHATSAPP_NUMBER = "whatsapp:+14155238886"
-OWNER_WHATSAPP_NUMBER  = "whatsapp:+918963746209" 
+load_dotenv()
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER")
+OWNER_WHATSAPP_NUMBER = os.getenv("OWNER_WHATSAPP_NUMBER")
 
 # ── MongoDB ───────────────────────────────────────────────────────────────────
-MONGODB_URI  = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+MONGODB_URI  = os.getenv("MONGODB_URI")
 mongo_client = MongoClient(MONGODB_URI)
 db           = mongo_client["studio5"]
 leads_col    = db["leads"]
