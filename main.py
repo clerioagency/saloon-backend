@@ -6,7 +6,7 @@ from typing import List, Optional
 import requests
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import os
 
@@ -39,12 +39,16 @@ db           = mongo_client["studio5"]
 leads_col    = db["leads"]
 
 # ── Lead helpers ──────────────────────────────────────────────────────────────
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def now_ist():
+    return datetime.now(IST)
 
 def load_leads() -> list:
     return list(leads_col.find({}, {"_id": 0}))
 
 def store_lead(name: str, phone: str, requirement: str, slot: str = "", booking_date: str = "") -> dict:
-    now = datetime.now()
+    now = now_ist()
     if not booking_date:
         booking_date = now.strftime("%Y-%m-%d")
     try:
@@ -58,15 +62,18 @@ def store_lead(name: str, phone: str, requirement: str, slot: str = "", booking_
         "phone":           phone,
         "requirement":     requirement,
         "slot":            slot,
-        "booking_date":    booking_date,          # date of appointment
-        "display_booking": display_booking,       # e.g. "16 May 2026"
+        "booking_date":    booking_date,
+        "display_booking": display_booking,
         "status":          "New",
         "timestamp":       now.isoformat(),
-        "date":            now.strftime("%Y-%m-%d"),  # date lead was created
+        "date":            now.strftime("%Y-%m-%d"),
         "time":            now.strftime("%I:%M %p"),
         "display_date":    now.strftime("%d %b %Y"),
     }
-    leads_col.insert_one({**lead})
+    if leads_col is not None:
+        leads_col.insert_one({**lead})
+    else:
+        print("❌ Cannot store lead — MongoDB not connected")
     return lead
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -322,6 +329,24 @@ def test_whatsapp():
     result = send_whatsapp("Test Client", "9999999999", "Test ping from Studio 5", "11:00 AM")
     return {"twilio_result": result, "from": TWILIO_WHATSAPP_NUMBER, "to": OWNER_WHATSAPP_NUMBER}
 
+@app.get("/test-db")
+def test_db():
+    try:
+        # ping the server
+        mongo_client.admin.command('ping')
+        collections = db.list_collection_names()
+        count = leads_col.count_documents({})
+        return {
+            "status": "connected",
+            "collections": collections,
+            "leads_count": count
+        }
+    except Exception as e:
+        return {
+            "status": "failed",
+            "error": str(e)
+        }
+
 # ── Leads API ─────────────────────────────────────────────────────────────────
 
 @app.get("/leads")
@@ -357,9 +382,12 @@ class BookingRequest(BaseModel):
 
 @app.post("/book")
 def book(req: BookingRequest):
+    if leads_col is None:
+        return {"success": False, "error": "Database not connected."}
     try:
-        lead = store_lead(req.name, req.phone, req.service, req.slot, req.date)
-        wa   = send_whatsapp(req.name, req.phone, req.service, req.slot, req.date)
+        booking_date = req.date if req.date else now_ist().strftime("%Y-%m-%d")
+        lead = store_lead(req.name, req.phone, req.service, req.slot, booking_date)
+        wa   = send_whatsapp(req.name, req.phone, req.service, req.slot, booking_date)
         return {
             "success": True,
             "lead_id": lead["id"],
