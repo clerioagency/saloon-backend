@@ -348,6 +348,26 @@ def delete_lead(lead_id: str):
     leads_col.delete_one({"id": lead_id})
     return {"ok": True}
 
+class BookingRequest(BaseModel):
+    name: str
+    phone: str
+    service: str
+    slot: str
+    date: str
+
+@app.post("/book")
+def book(req: BookingRequest):
+    try:
+        lead = store_lead(req.name, req.phone, req.service, req.slot, req.date)
+        wa   = send_whatsapp(req.name, req.phone, req.service, req.slot, req.date)
+        return {
+            "success": True,
+            "lead_id": lead["id"],
+            "whatsapp": wa.get("status")
+        }
+    except Exception as e:
+        print("Booking error:", e)
+        return {"success": False, "error": str(e)}
 # ── Serve HTML ────────────────────────────────────────────────────────────────
 
 # FRONTEND_OWNER_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend-owner")
