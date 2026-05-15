@@ -53,7 +53,9 @@ def store_lead(name: str, phone: str, requirement: str, slot: str = "", booking_
         booking_date = now.strftime("%Y-%m-%d")
     try:
         bd = datetime.strptime(booking_date, "%Y-%m-%d")
-        display_booking = bd.strftime("%d %b %Y")
+        day = bd.day
+        months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+        display_booking = f"{day} {months[bd.month - 1]} {bd.year}"
     except:
         display_booking = booking_date
     lead = {
