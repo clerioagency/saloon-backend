@@ -357,24 +357,24 @@ def delete_lead(lead_id: str):
 # DASHBOARD_HTML_PATH = os.getenv("DASHBOARD_HTML_PATH", os.path.join(os.path.dirname(__file__), "dashboard.html"))
 # ── HTML PATHS ─────────────────────────────────────────────────────
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-ROOT_DIR = os.path.dirname(BASE_DIR)
+# ROOT_DIR = os.path.dirname(BASE_DIR)
 
-USER_FRONTEND_DIR  = os.path.join(ROOT_DIR, "saloon-frontend-user")
-OWNER_FRONTEND_DIR = os.path.join(ROOT_DIR, "saloon-frontend-owner")
+# USER_FRONTEND_DIR  = os.path.join(ROOT_DIR, "saloon-frontend-user")
+# OWNER_FRONTEND_DIR = os.path.join(ROOT_DIR, "saloon-frontend-owner")
 
-INDEX_HTML_PATH     = os.path.join(USER_FRONTEND_DIR, "index.html")
-DASHBOARD_HTML_PATH = os.path.join(OWNER_FRONTEND_DIR, "dashboard.html")
+# INDEX_HTML_PATH     = os.path.join(USER_FRONTEND_DIR, "index.html")
+# DASHBOARD_HTML_PATH = os.path.join(OWNER_FRONTEND_DIR, "dashboard.html")
 
-@app.get("/dashboard")
-def serve_dashboard():
-    if not os.path.exists(DASHBOARD_HTML_PATH):
-        return {"error": f"dashboard.html not found at: {DASHBOARD_HTML_PATH}"}
-    return FileResponse(DASHBOARD_HTML_PATH)
+# @app.get("/dashboard")
+# def serve_dashboard():
+#     if not os.path.exists(DASHBOARD_HTML_PATH):
+#         return {"error": f"dashboard.html not found at: {DASHBOARD_HTML_PATH}"}
+#     return FileResponse(DASHBOARD_HTML_PATH)
 
-@app.get("/")
-def serve_index():
-    if not os.path.exists(INDEX_HTML_PATH):
-        return {"error": f"index.html not found at: {INDEX_HTML_PATH}"}
-    return FileResponse(INDEX_HTML_PATH)
+# @app.get("/")
+# def serve_index():
+#     if not os.path.exists(INDEX_HTML_PATH):
+#         return {"error": f"index.html not found at: {INDEX_HTML_PATH}"}
+#     return FileResponse(INDEX_HTML_PATH)
