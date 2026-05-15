@@ -353,6 +353,8 @@ def delete_lead(lead_id: str):
 FRONTEND_OWNER_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend-owner")
 INDEX_HTML_PATH     = os.path.join(FRONTEND_OWNER_DIR, "index.html")
 DASHBOARD_HTML_PATH = os.path.join(FRONTEND_OWNER_DIR, "dashboard.html")
+# INDEX_HTML_PATH     = os.getenv("INDEX_HTML_PATH",     os.path.join(os.path.dirname(__file__), "index.html"))
+# DASHBOARD_HTML_PATH = os.getenv("DASHBOARD_HTML_PATH", os.path.join(os.path.dirname(__file__), "dashboard.html"))
 
 @app.get("/dashboard")
 def serve_dashboard():
