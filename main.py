@@ -255,11 +255,11 @@ def send_whatsapp(name: str, phone: str, requirement: str, slot: str = "", booki
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-@app.post("/login")
-def login(data: LoginData):
-    if data.username == "admin" and data.password == "1234":
-        return {"success": True}
-    return {"success": False}
+# @app.post("/login")
+# def login(data: LoginData):
+#     if data.username == "admin" and data.password == "1234":
+#         return {"success": True}
+#     return {"success": False}
 
 @app.get("/ping")
 def ping():
@@ -350,20 +350,32 @@ def delete_lead(lead_id: str):
 
 # ── Serve HTML ────────────────────────────────────────────────────────────────
 
-FRONTEND_OWNER_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend-owner")
-INDEX_HTML_PATH     = os.path.join(FRONTEND_OWNER_DIR, "index.html")
-DASHBOARD_HTML_PATH = os.path.join(FRONTEND_OWNER_DIR, "dashboard.html")
+# FRONTEND_OWNER_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend-owner")
+# INDEX_HTML_PATH     = os.path.join(FRONTEND_OWNER_DIR, "index.html")
+# DASHBOARD_HTML_PATH = os.path.join(FRONTEND_OWNER_DIR, "dashboard.html")
 # INDEX_HTML_PATH     = os.getenv("INDEX_HTML_PATH",     os.path.join(os.path.dirname(__file__), "index.html"))
 # DASHBOARD_HTML_PATH = os.getenv("DASHBOARD_HTML_PATH", os.path.join(os.path.dirname(__file__), "dashboard.html"))
 
-@app.get("/dashboard")
-def serve_dashboard():
-    if not os.path.exists(DASHBOARD_HTML_PATH):
-        return {"error": f"dashboard.html not found at: {DASHBOARD_HTML_PATH}"}
-    return FileResponse(DASHBOARD_HTML_PATH)
+# @app.get("/dashboard")
+# def serve_dashboard():
+#     if not os.path.exists(DASHBOARD_HTML_PATH):
+#         return {"error": f"dashboard.html not found at: {DASHBOARD_HTML_PATH}"}
+#     return FileResponse(DASHBOARD_HTML_PATH)
+
+# @app.get("/")
+# def serve_index():
+#     if not os.path.exists(INDEX_HTML_PATH):
+#         return {"error": f"index.html not found at: {INDEX_HTML_PATH}"}
+#     return FileResponse(INDEX_HTML_PATH)
+
+OWNER_FRONTEND_URL = os.getenv("OWNER_FRONTEND_URL", "https://studiofive-owner.netlify.app/")
+
+@app.post("/login")
+def login(data: LoginData):
+    if data.username == "admin" and data.password == "1234":
+        return {"success": True, "dashboard_url": f"{OWNER_FRONTEND_URL}/dashboard.html"}
+    return {"success": False}
 
 @app.get("/")
-def serve_index():
-    if not os.path.exists(INDEX_HTML_PATH):
-        return {"error": f"index.html not found at: {INDEX_HTML_PATH}"}
-    return FileResponse(INDEX_HTML_PATH)
+def root():
+    return {"status": "Studio 5 backend is running"}
