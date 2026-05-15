@@ -13,7 +13,6 @@ from pymongo import MongoClient
 
 app = FastAPI()
 
-# Generated once at startup — changes every time the server restarts
 SERVER_SESSION_ID = str(uuid.uuid4())
 
 app.add_middleware(
@@ -24,11 +23,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-GROQ_API_KEY = "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"
-TWILIO_ACCOUNT_SID = "ACa873e142392be8896ea52d9331711df7"
-TWILIO_AUTH_TOKEN = "01872d91965669f1a04078363cd473a2"
+GROQ_API_KEY           = "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"
+TWILIO_ACCOUNT_SID     = "ACfa29e0490de295a9e7b3856e5da2039f"
+TWILIO_AUTH_TOKEN      = "8ec97d21870dab47709b29701e380d20"
 TWILIO_WHATSAPP_NUMBER = "whatsapp:+14155238886"
-OWNER_WHATSAPP_NUMBER = "whatsapp:+918072226977"
+OWNER_WHATSAPP_NUMBER  = "whatsapp:+918963746209" 
 
 # ── MongoDB ───────────────────────────────────────────────────────────────────
 MONGODB_URI  = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
@@ -41,18 +40,28 @@ leads_col    = db["leads"]
 def load_leads() -> list:
     return list(leads_col.find({}, {"_id": 0}))
 
-def store_lead(name: str, phone: str, requirement: str) -> dict:
+def store_lead(name: str, phone: str, requirement: str, slot: str = "", booking_date: str = "") -> dict:
     now = datetime.now()
+    if not booking_date:
+        booking_date = now.strftime("%Y-%m-%d")
+    try:
+        bd = datetime.strptime(booking_date, "%Y-%m-%d")
+        display_booking = bd.strftime("%d %b %Y")
+    except:
+        display_booking = booking_date
     lead = {
-        "id":           str(uuid.uuid4()),
-        "name":         name,
-        "phone":        phone,
-        "requirement":  requirement,
-        "status":       "New",
-        "timestamp":    now.isoformat(),
-        "date":         now.strftime("%Y-%m-%d"),
-        "time":         now.strftime("%I:%M %p"),
-        "display_date": now.strftime("%d %b %Y"),
+        "id":              str(uuid.uuid4()),
+        "name":            name,
+        "phone":           phone,
+        "requirement":     requirement,
+        "slot":            slot,
+        "booking_date":    booking_date,          # date of appointment
+        "display_booking": display_booking,       # e.g. "16 May 2026"
+        "status":          "New",
+        "timestamp":       now.isoformat(),
+        "date":            now.strftime("%Y-%m-%d"),  # date lead was created
+        "time":            now.strftime("%I:%M %p"),
+        "display_date":    now.strftime("%d %b %Y"),
     }
     leads_col.insert_one({**lead})
     return lead
@@ -70,13 +79,13 @@ BEHAVIOR:
 BOOKING FORM RULE (CRITICAL):
 - The website has a built-in booking form that appears automatically in the chat
 - When a user shows interest in booking, respond ONLY with something like:
-  "Great! Please fill in the form below to confirm your booking 📋"
+  "Awesome! Just fill in the quick form below and our team will call you to confirm 🎉"
 - NEVER ask for name or phone number in chat — the form collects that
 - NEVER say "can you share your phone number" or "what's your name"
-- Just encourage them to fill the form that's already on screen
+- The form also shows available time slots for today — booked slots are marked and disabled
 
 LEAD CAPTURE:
-- The moment user shows ANY interest in a service or booking, trigger the form by saying:
+- The moment user shows ANY interest in a service or booking, say:
   "Awesome! Just fill in the quick form below and our team will call you to confirm 🎉"
 
 SERVICES & PRICING:
@@ -86,6 +95,7 @@ Waxing Arms Rs.299 · Legs Rs.399 · Manicure Rs.499 · Pedicure Rs.599 · Brida
 
 TIMINGS: 10 AM – 8 PM daily · LOCATION: City Centre Mall, Ground Floor
 """
+
 # ── Pydantic models ───────────────────────────────────────────────────────────
 
 class Message(BaseModel):
@@ -108,6 +118,18 @@ class LoginData(BaseModel):
 def detect_phone(text: str):
     match = re.search(r'\b\d{10}\b', text)
     return match.group(0) if match else None
+
+def detect_slot(text: str) -> str:
+    """Extract time slot like '01:00 PM' or '1pm' from message."""
+    # Match format from form: HH:MM AM/PM
+    match = re.search(r'\b(\d{1,2}:\d{2}\s?(?:AM|PM))\b', text, re.IGNORECASE)
+    if match:
+        return match.group(1).upper()
+    # Match loose format: 1pm, 2:30pm etc
+    match = re.search(r'\bat\s+(\d{1,2}(?::\d{2})?\s?(?:am|pm))\b', text, re.IGNORECASE)
+    if match:
+        return match.group(1).upper()
+    return ""
 
 def extract_name(history: list, groq_api_key: str) -> str:
     if not history:
@@ -194,7 +216,7 @@ def extract_requirement(history: list, current_msg: str, groq_api_key: str) -> s
                 return kw.title()
     return "General enquiry"
 
-def send_whatsapp(name: str, phone: str, requirement: str) -> dict:
+def send_whatsapp(name: str, phone: str, requirement: str, slot: str = "", booking_date: str = "") -> dict:
     missing = [k for k, v in {
         "TWILIO_ACCOUNT_SID":     TWILIO_ACCOUNT_SID,
         "TWILIO_AUTH_TOKEN":      TWILIO_AUTH_TOKEN,
@@ -209,7 +231,8 @@ def send_whatsapp(name: str, phone: str, requirement: str) -> dict:
     from_num = TWILIO_WHATSAPP_NUMBER if TWILIO_WHATSAPP_NUMBER.startswith("whatsapp:") else f"whatsapp:{TWILIO_WHATSAPP_NUMBER}"
     to_num   = OWNER_WHATSAPP_NUMBER  if OWNER_WHATSAPP_NUMBER.startswith("whatsapp:")  else f"whatsapp:{OWNER_WHATSAPP_NUMBER}"
 
-    body = f"New Booking Lead 💇‍♀️\n\nName: {name}\nPhone: {phone}\nService Requested: {requirement}\n\n— Studio 5"
+    slot_line = f"\n⏰ Slot: {slot}" if slot else ""
+    body = f"New Booking Lead 💇‍♀️\n\nName: {name}\nPhone: {phone}\nService: {requirement}{slot_line}\n📅 Date: {booking_date}\n\n— Studio 5"
 
     try:
         url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
@@ -220,13 +243,8 @@ def send_whatsapp(name: str, phone: str, requirement: str) -> dict:
             timeout=10
         )
         result = res.json()
-        print("── Twilio ───────────────────────────")
-        print(f"  HTTP    : {res.status_code}")
-        print(f"  SID     : {result.get('sid', '—')}")
-        print(f"  Error   : {result.get('message', 'none')}")
-        print(f"  From    : {from_num}")
-        print(f"  To      : {to_num}")
-        print("─────────────────────────────────────")
+        print("── Twilio ────────────────────────────")
+        print(f"  HTTP : {res.status_code} | SID: {result.get('sid','—')} | Error: {result.get('message','none')}")
         return {"status": res.status_code, "sid": result.get("sid"), "error": result.get("message")}
     except Exception as e:
         print(f"❌ WhatsApp exception: {e}")
@@ -271,32 +289,34 @@ def chat(req: ChatRequest):
 
     phone = detect_phone(user_msg)
     if phone:
-        full_history = list(req.history or [])
-
-        class _CurMsg:
-            role = "user"
-            content = user_msg
-
-        full_history.append(_CurMsg())
         print("=== LEAD DETECTED ===")
-        print(f"  Phone: {phone}")
 
-        name        = extract_name(full_history, GROQ_API_KEY)
-        requirement = extract_requirement(req.history or [], user_msg, GROQ_API_KEY)
-        print(f"  Name: {name} | Req: {requirement}")
+        # Fast parse from synthetic message: "My name is X and my number is Y. I want to book: Z at T."
+        # No LLM calls needed — form always sends this exact format
+        name_match = re.search(r'My name is ([A-Za-z ]+?) and my number', user_msg, re.IGNORECASE)
+        req_match  = re.search(r'I want to book:\s*([^.]+?)(?:\s+at\s+|\.)', user_msg, re.IGNORECASE)
+        name        = name_match.group(1).strip().title() if name_match else "Customer"
+        requirement = req_match.group(1).strip() if req_match else "General Enquiry"
+        slot        = detect_slot(user_msg)
+        # Extract booking date from synthetic message: "on YYYY-MM-DD"
+        date_match    = re.search(r'on (\d{4}-\d{2}-\d{2})', user_msg)
+        booking_date  = date_match.group(1) if date_match else datetime.now().strftime('%Y-%m-%d')
 
-        store_lead(name, phone, requirement)
-        wa_result = send_whatsapp(name, phone, requirement)
+        print(f"  Name: {name} | Req: {requirement} | Slot: {slot} | Date: {booking_date} | Phone: {phone}")
+
+        store_lead(name, phone, requirement, slot, booking_date)
+        wa_result = send_whatsapp(name, phone, requirement, slot, booking_date)
         print("WhatsApp result:", wa_result)
 
-        greeting = f", {name}" if name != "Customer" else ""
-        ai_reply = f"Perfect{greeting}! ✨ Our Studio 5 team will call you shortly to confirm your appointment. We can't wait to pamper you! 💇‍♀️"
+        greeting  = f", {name}" if name != "Customer" else ""
+        slot_line = f" at {slot}" if slot else ""
+        ai_reply  = f"Perfect{greeting}! ✨ Your {requirement} appointment{slot_line} is confirmed. Our Studio 5 team will call you shortly! 💇‍♀️"
 
     return {"reply": ai_reply}
 
 @app.get("/test-whatsapp")
 def test_whatsapp():
-    result = send_whatsapp("Test Client", "9999999999", "Test ping from Studio 5")
+    result = send_whatsapp("Test Client", "9999999999", "Test ping from Studio 5", "11:00 AM")
     return {"twilio_result": result, "from": TWILIO_WHATSAPP_NUMBER, "to": OWNER_WHATSAPP_NUMBER}
 
 # ── Leads API ─────────────────────────────────────────────────────────────────
@@ -326,23 +346,7 @@ def delete_lead(lead_id: str):
     return {"ok": True}
 
 # ── Serve HTML ────────────────────────────────────────────────────────────────
-#
-# Place index.html and dashboard.html in the same folder as main.py,
-# or override with env vars:
-#
-#   INDEX_HTML_PATH     = /path/to/index.html
-#   DASHBOARD_HTML_PATH = /path/to/dashboard.html
-#
-# NOTE: These routes must stay LAST so they don't shadow API routes.
-#
-#   http://127.0.0.1:8000           → login   (index.html)
-#   http://127.0.0.1:8000/dashboard → dashboard (dashboard.html)
 
-# Folder structure:
-#   agent2/
-#   ├── backend-deploy/   ← main.py is here
-#   ├── frontend-owner/   ← index.html & dashboard.html are here
-#   └── frontend-user/
 FRONTEND_OWNER_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend-owner")
 INDEX_HTML_PATH     = os.path.join(FRONTEND_OWNER_DIR, "index.html")
 DASHBOARD_HTML_PATH = os.path.join(FRONTEND_OWNER_DIR, "dashboard.html")
