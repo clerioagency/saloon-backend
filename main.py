@@ -9,6 +9,8 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import os
+import threading
+import time
 
 from pymongo import MongoClient
 
@@ -26,11 +28,12 @@ app.add_middleware(
 
 load_dotenv()
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+GROQ_API_KEY           = os.getenv("GROQ_API_KEY")
+TWILIO_ACCOUNT_SID     = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN      = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER")
-OWNER_WHATSAPP_NUMBER = os.getenv("OWNER_WHATSAPP_NUMBER")
+OWNER_WHATSAPP_NUMBER  = os.getenv("OWNER_WHATSAPP_NUMBER")
+RENDER_URL             = os.getenv("RENDER_URL", "https://your-app-name.onrender.com")  # 🔴 set in .env or Render dashboard
 
 # ── MongoDB ───────────────────────────────────────────────────────────────────
 MONGODB_URI  = os.getenv("MONGODB_URI")
@@ -38,11 +41,25 @@ mongo_client = MongoClient(MONGODB_URI)
 db           = mongo_client["studio5"]
 leads_col    = db["leads"]
 
-# ── Lead helpers ──────────────────────────────────────────────────────────────
+# ── Timezone ──────────────────────────────────────────────────────────────────
 IST = timezone(timedelta(hours=5, minutes=30))
 
 def now_ist():
     return datetime.now(IST)
+
+# ── Keep-alive (prevents Render free tier sleep) ──────────────────────────────
+def keep_alive():
+    while True:
+        time.sleep(600)  # ping every 10 minutes
+        try:
+            requests.get(f"{RENDER_URL}/ping", timeout=10)
+            print("Keep-alive ping sent")
+        except Exception as e:
+            print(f"Keep-alive failed: {e}")
+
+threading.Thread(target=keep_alive, daemon=True).start()
+
+# ── Lead helpers ──────────────────────────────────────────────────────────────
 
 def load_leads() -> list:
     return list(leads_col.find({}, {"_id": 0}))
@@ -125,6 +142,13 @@ class LoginData(BaseModel):
     username: str
     password: str
 
+class BookingRequest(BaseModel):
+    name: str
+    phone: str
+    service: str
+    slot: str
+    date: str
+
 # ── Utilities ─────────────────────────────────────────────────────────────────
 
 def detect_phone(text: str):
@@ -132,12 +156,9 @@ def detect_phone(text: str):
     return match.group(0) if match else None
 
 def detect_slot(text: str) -> str:
-    """Extract time slot like '01:00 PM' or '1pm' from message."""
-    # Match format from form: HH:MM AM/PM
     match = re.search(r'\b(\d{1,2}:\d{2}\s?(?:AM|PM))\b', text, re.IGNORECASE)
     if match:
         return match.group(1).upper()
-    # Match loose format: 1pm, 2:30pm etc
     match = re.search(r'\bat\s+(\d{1,2}(?::\d{2})?\s?(?:am|pm))\b', text, re.IGNORECASE)
     if match:
         return match.group(1).upper()
@@ -240,11 +261,19 @@ def send_whatsapp(name: str, phone: str, requirement: str, slot: str = "", booki
         print(f"❌ Missing Twilio env vars: {missing}")
         return {"status": None, "error": f"Missing env vars: {missing}"}
 
-    from_num = TWILIO_WHATSAPP_NUMBER if TWILIO_WHATSAPP_NUMBER.startswith("whatsapp:") else f"whatsapp:{TWILIO_WHATSAPP_NUMBER}"
-    to_num   = OWNER_WHATSAPP_NUMBER  if OWNER_WHATSAPP_NUMBER.startswith("whatsapp:")  else f"whatsapp:{OWNER_WHATSAPP_NUMBER}"
-
+    from_num  = TWILIO_WHATSAPP_NUMBER if TWILIO_WHATSAPP_NUMBER.startswith("whatsapp:") else f"whatsapp:{TWILIO_WHATSAPP_NUMBER}"
+    to_num    = OWNER_WHATSAPP_NUMBER  if OWNER_WHATSAPP_NUMBER.startswith("whatsapp:")  else f"whatsapp:{OWNER_WHATSAPP_NUMBER}"
     slot_line = f"\n⏰ Slot: {slot}" if slot else ""
-    body = f"New Booking Lead 💇‍♀️\n\nName: {name}\nPhone: {phone}\nService: {requirement}{slot_line}\n📅 Date: {booking_date}\n\n— Studio 5"
+    wa_link   = f"https://wa.me/91{phone}"  # tap to open customer's WhatsApp directly
+    body = (
+        f"New Booking Lead 💇‍♀️\n\n"
+        f"Name: {name}\n"
+        f"Phone: {phone}\n"
+        f"WhatsApp: {wa_link}\n"
+        f"Service: {requirement}{slot_line}\n"
+        f"📅 Date: {booking_date}\n\n"
+        f"— Studio 5"
+    )
 
     try:
         url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
@@ -263,12 +292,6 @@ def send_whatsapp(name: str, phone: str, requirement: str, slot: str = "", booki
         return {"status": None, "error": str(e)}
 
 # ── Routes ────────────────────────────────────────────────────────────────────
-
-# @app.post("/login")
-# def login(data: LoginData):
-#     if data.username == "admin" and data.password == "1234":
-#         return {"success": True}
-#     return {"success": False}
 
 @app.get("/ping")
 def ping():
@@ -303,16 +326,13 @@ def chat(req: ChatRequest):
     if phone:
         print("=== LEAD DETECTED ===")
 
-        # Fast parse from synthetic message: "My name is X and my number is Y. I want to book: Z at T."
-        # No LLM calls needed — form always sends this exact format
-        name_match = re.search(r'My name is ([A-Za-z ]+?) and my number', user_msg, re.IGNORECASE)
-        req_match  = re.search(r'I want to book:\s*([^.]+?)(?:\s+at\s+|\.)', user_msg, re.IGNORECASE)
+        name_match  = re.search(r'My name is ([A-Za-z ]+?) and my number', user_msg, re.IGNORECASE)
+        req_match   = re.search(r'I want to book:\s*([^.]+?)(?:\s+at\s+|\.)', user_msg, re.IGNORECASE)
         name        = name_match.group(1).strip().title() if name_match else "Customer"
         requirement = req_match.group(1).strip() if req_match else "General Enquiry"
         slot        = detect_slot(user_msg)
-        # Extract booking date from synthetic message: "on YYYY-MM-DD"
-        date_match    = re.search(r'on (\d{4}-\d{2}-\d{2})', user_msg)
-        booking_date  = date_match.group(1) if date_match else datetime.now().strftime('%Y-%m-%d')
+        date_match  = re.search(r'on (\d{4}-\d{2}-\d{2})', user_msg)
+        booking_date = date_match.group(1) if date_match else now_ist().strftime('%Y-%m-%d')
 
         print(f"  Name: {name} | Req: {requirement} | Slot: {slot} | Date: {booking_date} | Phone: {phone}")
 
@@ -326,6 +346,19 @@ def chat(req: ChatRequest):
 
     return {"reply": ai_reply}
 
+@app.post("/book")
+def book(req: BookingRequest):
+    if leads_col is None:
+        return {"success": False, "error": "Database not connected."}
+    try:
+        booking_date = req.date if req.date else now_ist().strftime("%Y-%m-%d")
+        lead = store_lead(req.name, req.phone, req.service, req.slot, booking_date)
+        wa   = send_whatsapp(req.name, req.phone, req.service, req.slot, booking_date)
+        return {"success": True, "lead_id": lead["id"], "whatsapp": wa.get("status")}
+    except Exception as e:
+        print("Booking error:", e)
+        return {"success": False, "error": str(e)}
+
 @app.get("/test-whatsapp")
 def test_whatsapp():
     result = send_whatsapp("Test Client", "9999999999", "Test ping from Studio 5", "11:00 AM")
@@ -334,20 +367,12 @@ def test_whatsapp():
 @app.get("/test-db")
 def test_db():
     try:
-        # ping the server
         mongo_client.admin.command('ping')
         collections = db.list_collection_names()
         count = leads_col.count_documents({})
-        return {
-            "status": "connected",
-            "collections": collections,
-            "leads_count": count
-        }
+        return {"status": "connected", "collections": collections, "leads_count": count}
     except Exception as e:
-        return {
-            "status": "failed",
-            "error": str(e)
-        }
+        return {"status": "failed", "error": str(e)}
 
 # ── Leads API ─────────────────────────────────────────────────────────────────
 
@@ -375,48 +400,7 @@ def delete_lead(lead_id: str):
     leads_col.delete_one({"id": lead_id})
     return {"ok": True}
 
-class BookingRequest(BaseModel):
-    name: str
-    phone: str
-    service: str
-    slot: str
-    date: str
-
-@app.post("/book")
-def book(req: BookingRequest):
-    if leads_col is None:
-        return {"success": False, "error": "Database not connected."}
-    try:
-        booking_date = req.date if req.date else now_ist().strftime("%Y-%m-%d")
-        lead = store_lead(req.name, req.phone, req.service, req.slot, booking_date)
-        wa   = send_whatsapp(req.name, req.phone, req.service, req.slot, booking_date)
-        return {
-            "success": True,
-            "lead_id": lead["id"],
-            "whatsapp": wa.get("status")
-        }
-    except Exception as e:
-        print("Booking error:", e)
-        return {"success": False, "error": str(e)}
-# ── Serve HTML ────────────────────────────────────────────────────────────────
-
-# FRONTEND_OWNER_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend-owner")
-# INDEX_HTML_PATH     = os.path.join(FRONTEND_OWNER_DIR, "index.html")
-# DASHBOARD_HTML_PATH = os.path.join(FRONTEND_OWNER_DIR, "dashboard.html")
-# INDEX_HTML_PATH     = os.getenv("INDEX_HTML_PATH",     os.path.join(os.path.dirname(__file__), "index.html"))
-# DASHBOARD_HTML_PATH = os.getenv("DASHBOARD_HTML_PATH", os.path.join(os.path.dirname(__file__), "dashboard.html"))
-
-# @app.get("/dashboard")
-# def serve_dashboard():
-#     if not os.path.exists(DASHBOARD_HTML_PATH):
-#         return {"error": f"dashboard.html not found at: {DASHBOARD_HTML_PATH}"}
-#     return FileResponse(DASHBOARD_HTML_PATH)
-
-# @app.get("/")
-# def serve_index():
-#     if not os.path.exists(INDEX_HTML_PATH):
-#         return {"error": f"index.html not found at: {INDEX_HTML_PATH}"}
-#     return FileResponse(INDEX_HTML_PATH)
+# ── Auth & Root ───────────────────────────────────────────────────────────────
 
 OWNER_FRONTEND_URL = os.getenv("OWNER_FRONTEND_URL", "https://studiofive-owner.netlify.app/")
 
